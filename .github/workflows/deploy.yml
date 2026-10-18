@@ -49,5 +49,28 @@ jobs:
             --exclude='logs/' --exclude='*.log' \
             -e "ssh -i ~/.ssh/deploy_key -p $VM_PORT" \
             ./ "$VM_USER@$VM_HOST:$DEPLOY_PATH/"
+
+      - name: Ensure Kafka container is running
+        env:
+          VM_HOST: ${{ secrets.GCP_VM_HOST || vars.GCP_VM_HOST }}
+          VM_USER: ${{ secrets.GCP_VM_USER || vars.GCP_VM_USER }}
+          VM_PORT: ${{ vars.GCP_VM_SSH_PORT || '22' }}
+          DEPLOY_PATH: ${{ vars.PRODUCER_DEPLOY_PATH || '/home/' }}
+          KAFKA_ADVERTISED_HOST: ${{ vars.KAFKA_ADVERTISED_HOST }}
+        run: |
+          test -n "$VM_HOST" || { echo 'Set GCP_VM_HOST as a repository secret or variable'; exit 1; }
+          test -n "$VM_USER" || { echo 'Set GCP_VM_USER as a repository secret or variable'; exit 1; }
+          if [ "$DEPLOY_PATH" = '/home/' ]; then DEPLOY_PATH="/home/$VM_USER/apps/neo-tel-signal-producer"; fi
+          ssh -i ~/.ssh/deploy_key -p "$VM_PORT" "$VM_USER@$VM_HOST" \
+            "DEPLOY_PATH='$DEPLOY_PATH' KAFKA_ADVERTISED_HOST='$KAFKA_ADVERTISED_HOST' bash '$DEPLOY_PATH/deploy/ensure-kafka.sh'"
+
+      - name: Deploy producer service
+        env:
+          VM_HOST: ${{ secrets.GCP_VM_HOST || vars.GCP_VM_HOST }}
+          VM_USER: ${{ secrets.GCP_VM_USER || vars.GCP_VM_USER }}
+          VM_PORT: ${{ vars.GCP_VM_SSH_PORT || '22' }}
+          DEPLOY_PATH: ${{ vars.PRODUCER_DEPLOY_PATH || '/home/' }}
+        run: |
+          if [ "$DEPLOY_PATH" = '/home/' ]; then DEPLOY_PATH="/home/$VM_USER/apps/neo-tel-signal-producer"; fi
           ssh -i ~/.ssh/deploy_key -p "$VM_PORT" "$VM_USER@$VM_HOST" \
             "DEPLOY_PATH='$DEPLOY_PATH' bash '$DEPLOY_PATH/deploy/deploy.sh'"
