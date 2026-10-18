@@ -14,7 +14,7 @@ Your job is to parse incoming Telegram messages from signal channels and output 
 
 Trading signals may appear in short, informal, or noisy formats, such as:
 - "buy nifty 22500 above 50" -> NEW_ORDER, BUY, NIFTY, 22500, CE (if not specified, infer from context or default to CE), ABOVE, trigger=50, entry=50
-- "nifty 22500 abv 55 sl 45" -> NEW_ORDER, BUY, NIFTY, 22500, CE, ABOVE, trigger=55, entry=55, stop_loss=45
+- "nifty 22500 abv 55 tgt 60/70 sl 45" -> NEW_ORDER, BUY, NIFTY, 22500, CE, ABOVE, trigger=55, entry=55, targets=[60,70], stop_loss=45
 - "buy sensex 75000 pe at 120" -> NEW_ORDER, BUY, SENSEX, 75000, PE, AT, entry=120
 - "ignore", "ignore previous", "cancel", "avoid", "exit", "exit nifty", "cancel nifty 22500" -> CANCEL_ORDER, IGNORE_SIGNAL, or CLOSE_POSITION. action="CANCEL", "IGNORE", or "EXIT". If contract is not mentioned, identify the latest contract from Recent Message History.
 - "sl hit", "target 1 done", "good morning" -> is_trading_signal: false, signal_type: NONE.
@@ -32,6 +32,7 @@ Allowed JSON structure:
   "trigger_price": number or null,
   "stop_loss": number or null,
   "target": number or null,
+  "targets": array of target prices in ascending order, or [],
   "reasoning": string
 }
 
@@ -39,9 +40,10 @@ Key Rules:
 1. 'abv' or 'above' => order_condition='ABOVE'.
 2. If order_condition is 'ABOVE', entry_price and trigger_price should be set to that trigger value.
 3. If 'sl' or 'stoploss' or 'stop loss' is mentioned, extract the numeric value into stop_loss.
-4. If no CE/PE is explicitly mentioned, look at the recent message history for the matching strike. If still ambiguous, default option_type to 'CE' and mention this in reasoning.
-5. For 'ignore', 'cancel', or 'exit', identify which contract or index from recent history it refers to so it can be cancelled/exited.
-6. Return ONLY valid JSON.
+4. Extract every price after TGT/TARGET/TARGETS into targets, preserving order. For compatibility, set target to the first target too. Never infer missing prices.
+5. If no CE/PE is explicitly mentioned, look at the recent message history for the matching strike. If still ambiguous, default option_type to 'CE' and mention this in reasoning.
+6. For 'ignore', 'cancel', or 'exit', identify which contract or index from recent history it refers to so it can be cancelled/exited.
+7. Return ONLY valid JSON.
 """
 
 
@@ -117,9 +119,16 @@ Current Message to analyze:
                 trigger_price=float(data["trigger_price"]) if data.get("trigger_price") is not None else None,
                 stop_loss=float(data["stop_loss"]) if data.get("stop_loss") is not None else None,
                 target=float(data["target"]) if data.get("target") is not None else None,
+                targets=[float(x) for x in data.get("targets", []) if x is not None],
                 reasoning=data.get("reasoning", ""),
                 raw_message=message_text
             )
+
+            # Normalize older/model responses that only provide the singular target.
+            if not parsed.targets and parsed.target is not None:
+                parsed.targets = [parsed.target]
+            elif parsed.targets and parsed.target is None:
+                parsed.target = parsed.targets[0]
 
             # Extra fallback for option_type: if not specified and index/strike are present, default to CE
             if parsed.is_trading_signal and parsed.strike_price and not parsed.option_type:
