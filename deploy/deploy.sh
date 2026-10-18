@@ -26,8 +26,8 @@ trap 'rm -f "$service_tmp"' EXIT
 cat > "$service_tmp" <<EOF
 [Unit]
 Description=Neo Telegram signal producer
-After=network-online.target
-Wants=network-online.target
+After=network-online.target docker.service
+Wants=network-online.target docker.service
 
 [Service]
 Type=simple

@@ -213,7 +213,7 @@ The deploy account needs SSH access, Python 3, `curl`, and passwordless `sudo` f
 
 ### Kafka container and network
 
-The producer workflow creates or starts `trading-kafka` on the producer VM. A new container uses the pinned Apache Kafka image `apache/kafka:4.1.2`, a persistent Docker volume named `trading-kafka-data`, and a Docker restart policy. It advertises the producer VM's private IP on port `9092`. An existing `trading-kafka` container is started if stopped and left unchanged if already running.
+The producer workflow creates or starts `trading-kafka` on the producer VM. A new container uses the pinned Apache Kafka image `apache/kafka:4.1.2`, a persistent Docker volume named `trading-kafka-data`, and a Docker restart policy. It advertises the producer VM's private IP on port `9092`. An existing `trading-kafka` container is started if stopped; its broker configuration is preserved, and the workflow ensures Docker will restart it after a VM reboot.
 
 The topic is created automatically by the broker when enabled. To create it explicitly on the producer VM, run:
 
@@ -234,6 +234,17 @@ For the consumer on another GCP VM:
 The producer itself can keep `KAFKA_BOOTSTRAP_SERVERS=localhost:9092`; Kafka metadata directs it to the broker's private address after the initial connection.
 
 ### Service and logs
+
+The deployment enables `docker.service` and `neo-tel-signal-producer.service` at boot. The producer starts after the Docker daemon and is configured to restart if the process exits. Kafka starts through Docker's `unless-stopped` restart policy. On reboot, the consumer service is also started by systemd; its 5-second restart policy lets it retry if Kafka is still starting. Stopping the GCP VM stops billing for the VM compute resources; when you start it again, Docker and the enabled systemd units start these services automatically.
+
+Docker manages Kafka, while systemd manages the producer and consumer processes. Each additional consumer VM has its own independent `neo-tel-order-processor.service`; it does not conflict with the producer VM's service. Configure a unique Kafka group ID for every consumer account that must receive every signal.
+
+Check that boot startup is enabled:
+
+```bash
+sudo systemctl is-enabled docker neo-tel-signal-producer
+sudo docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' trading-kafka
+```
 
 The deployment installs and enables `neo-tel-signal-producer.service`:
 

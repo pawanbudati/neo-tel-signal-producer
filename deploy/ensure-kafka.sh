@@ -36,10 +36,11 @@ fi
 
 if sudo docker container inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
   state="$(sudo docker container inspect --format '{{.State.Status}}' "$CONTAINER_NAME")"
+  sudo docker update --restart unless-stopped "$CONTAINER_NAME" >/dev/null
   if [[ "$state" == "running" ]]; then
-    echo "Kafka container '$CONTAINER_NAME' is already running; leaving it unchanged."
+    echo "Kafka container '$CONTAINER_NAME' is already running; preserving broker configuration and enabling restart on VM boot."
   else
-    echo "Starting existing Kafka container '$CONTAINER_NAME'."
+    echo "Starting existing Kafka container '$CONTAINER_NAME' with restart on VM boot enabled."
     sudo docker start "$CONTAINER_NAME"
   fi
 else
