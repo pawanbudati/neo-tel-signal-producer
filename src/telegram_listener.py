@@ -9,6 +9,7 @@ from src.logger import logger
 from src.gemini_parser import GeminiParser
 from src.signal_dispatcher import SignalDispatcher
 from src.models import ParsedSignal
+from src.message_filter import MessageFilter
 
 class TelegramListener:
     """
@@ -127,7 +128,17 @@ class TelegramListener:
                 f"[dim]------------------------------------[/dim]"
             )
 
-            # Process with Gemini
+            # Intelligent pre-filter: Skip price tracking emojis, celebration hype, and non-trade spam
+            should_process, filter_reason = MessageFilter.should_process_message(text)
+            if not should_process:
+                logger.info(f"[dim yellow]Filtered non-signal message ({filter_reason}): {text.strip()}[/dim yellow]")
+                # Still record in history for conversational context if needed
+                self.history.append(f"[{chat_title}] {text}")
+                if len(self.history) > 20:
+                    self.history.pop(0)
+                return
+
+            # Process valid signal candidates with Gemini AI
             parsed_signal = self.parser.parse_message(text, history=self.history)
 
             # Record in history buffer for context memory
