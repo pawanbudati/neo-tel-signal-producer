@@ -79,3 +79,18 @@ def test_order_modification_and_exits_pass():
     for msg in mgmt_calls:
         should_process, reason = MessageFilter.should_process_message(msg)
         assert should_process, f"Management call was incorrectly filtered: '{msg}', reason: {reason}"
+
+def test_multipart_split_signals_pass():
+    """Ensures split/continuation messages across multiple posts pass to Gemini."""
+    split_parts = [
+        "NIFTY 23000 PE",
+        "abv 32",
+        "SL 25 TGT 40, 50, 60+",
+        "BUY ABOVE 120",
+        "CMP 85",
+        "TARGET 150",
+    ]
+
+    for part in split_parts:
+        should_process, reason = MessageFilter.should_process_message(part)
+        assert should_process, f"Split signal part was incorrectly filtered: '{part}', reason: {reason}"

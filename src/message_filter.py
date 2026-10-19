@@ -79,19 +79,22 @@ class MessageFilter:
                 return False, "TARGET_CELEBRATION_OR_PROMO"
 
         # Rule 5: Signal Candidate Structure Gate
-        # Genuine trading signals must mention an index OR an option strike pattern (e.g., 24050 CE)
-        # OR trading action keywords (BUY, SELL, ABV, ABOVE, CMP, SL, TGT, TARGET)
         has_index = any(idx in upper for idx in cls.INDEX_PATTERNS)
         has_strike_option = bool(re.search(r"\b\d{4,5}\s*(?:CE|PE|CALL|PUT)\b", upper))
         has_trading_verbs = bool(re.search(r"\b(?:BUY|SELL|ABV|ABOVE|BELOW|BLW|CMP|SL|TGT|TARGET|ENTRY)\b", upper))
 
-        # If it has an instrument AND a trading verb/strike, it's definitely a signal candidate
-        if (has_index or has_strike_option) and has_trading_verbs:
-            return True, "ACTIONABLE_SIGNAL_CANDIDATE"
+        # Check for multi-part trade continuations (e.g., 'abv 32', 'SL 25 TGT 40, 50, 60+')
+        # These are split messages following an instrument call and need Gemini's history context!
+        has_action_with_price = bool(re.search(r"\b(?:BUY|SELL|ABV|ABOVE|BELOW|BLW|CMP|SL|TGT|TARGET)\s*[:=]?\s*\d+", upper))
 
-        # If it has an index or strike alone (some callers just post: "NIFTY 24050 CE 44"), pass it
-        if has_index and has_strike_option:
+        # If it has an instrument alone, or with verbs, it is a candidate
+        if has_index or has_strike_option:
             return True, "INSTRUMENT_IDENTIFIED"
 
-        # If it doesn't have any market instrument or trading keywords, it's commentary/noise
+        # If it has an action keyword with a price (like 'abv 32', 'sl 25', 'tgt 40'),
+        # it is a continuation of a prior message in Gemini's context history!
+        if has_action_with_price:
+            return True, "TRADE_CONTINUATION_FRAGMENT"
+
+        # Otherwise it's general commentary or chatter
         return False, "NON_ACTIONABLE_COMMENTARY"
