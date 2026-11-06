@@ -5,7 +5,6 @@
 
 .DESCRIPTION
     Syncs repository files to GCP VM (excluding .venv, .env, sessions, git, logs) and executes remote deploy.sh.
-    Optionally manages or skips the local Docker Kafka container.
 
 .PARAMETER VmHost
     Override Host IP/DNS for Producer VM.
@@ -16,12 +15,8 @@
 .PARAMETER SshKey
     Path to private SSH key.
 
-.PARAMETER SkipKafka
-    Switch to skip running ensure-kafka.sh (useful if Kafka is hosted on OCI or dedicated VM).
-
 .EXAMPLE
     .\deploy\manual_deploy.ps1
-    .\deploy\manual_deploy.ps1 -SkipKafka
     .\deploy\manual_deploy.ps1 -VmHost "34.93.x.x" -VmUser "pawanbudati"
 #>
 
@@ -31,8 +26,7 @@ param(
     [string]$VmUser = $null,
     [string]$SshKey = $null,
     [int]$Port = 0,
-    [string]$DeployPath = $null,
-    [switch]$SkipKafka
+    [string]$DeployPath = $null
 )
 
 $ErrorActionPreference = 'Stop'
@@ -77,7 +71,6 @@ $userName = if ($VmUser) { $VmUser } elseif ($env:GCP_VM_USER) { $env:GCP_VM_USE
 $keyPath  = if ($SshKey) { $SshKey } elseif ($env:GCP_VM_SSH_KEY) { $env:GCP_VM_SSH_KEY } else { $env:SSH_KEY_PATH }
 $portNum  = if ($Port -gt 0) { $Port } elseif ($env:GCP_VM_SSH_PORT) { [int]$env:GCP_VM_SSH_PORT } elseif ($env:VM_PORT) { [int]$env:VM_PORT } else { 22 }
 $remoteDir = if ($DeployPath) { $DeployPath } elseif ($env:PRODUCER_DEPLOY_PATH) { $env:PRODUCER_DEPLOY_PATH } else { $env:DEPLOY_PATH }
-$advHost  = if ($env:KAFKA_ADVERTISED_HOST) { $env:KAFKA_ADVERTISED_HOST } else { "" }
 
 if (-not $hostName -or -not $userName) {
     throw "Host and User must be configured in .env.deploy or passed via parameters."
@@ -87,12 +80,9 @@ if (-not $remoteDir -or $remoteDir -eq '/home/') {
     $remoteDir = "/home/$userName/apps/neo-tel-signal-producer"
 }
 
-$shouldSkipKafka = $SkipKafka.IsPresent -or ($env:SKIP_KAFKA -eq "true")
-
 Write-Host "`n=================================================================" -ForegroundColor Green
 Write-Host ">>> Deploying Producer to ${userName}@${hostName}:${portNum}" -ForegroundColor Green
 Write-Host ">>> Remote Path: $remoteDir" -ForegroundColor Green
-Write-Host ">>> Skip Kafka Container: $shouldSkipKafka" -ForegroundColor Green
 Write-Host "=================================================================" -ForegroundColor Green
 
 $sshArgs = @("-p", "$portNum", "-o", "StrictHostKeyChecking=accept-new")
@@ -146,18 +136,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "File sync to $hostName failed."
 }
 
-# 3. Ensure Kafka container if not skipped
-if (-not $shouldSkipKafka) {
-    Write-Host ">>> Ensuring Kafka container is running on $hostName..." -ForegroundColor Yellow
-    & ssh $sshArgs "${userName}@${hostName}" "DEPLOY_PATH='$remoteDir' KAFKA_ADVERTISED_HOST='$advHost' bash '$remoteDir/deploy/ensure-kafka.sh'"
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to ensure Kafka container on $hostName."
-    }
-} else {
-    Write-Host ">>> Skipping Kafka container management (SkipKafka is true)." -ForegroundColor Cyan
-}
-
-# 4. Execute remote deploy.sh
+# 3. Execute remote deploy.sh
 Write-Host ">>> Executing remote deploy.sh on $hostName..." -ForegroundColor Yellow
 & ssh $sshArgs "${userName}@${hostName}" "DEPLOY_PATH='$remoteDir' bash '$remoteDir/deploy/deploy.sh'"
 if ($LASTEXITCODE -ne 0) {

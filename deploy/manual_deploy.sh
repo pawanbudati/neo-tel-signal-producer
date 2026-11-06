@@ -5,7 +5,7 @@ set -Eeuo pipefail
 # Manual Deployment Script for Signal Producer
 # Matches GitHub Actions (.github/workflows/deploy.yml)
 # Usage:
-#   ./deploy/manual_deploy.sh [--skip-kafka]
+#   ./deploy/manual_deploy.sh
 # ─────────────────────────────────────────────────────────────────────────────
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,19 +23,11 @@ for env_file in "$ROOT_DIR/.env.deploy" "$SCRIPT_DIR/.env.deploy" "$ROOT_DIR/.de
   fi
 done
 
-SKIP_KAFKA="${SKIP_KAFKA:-false}"
-for arg in "$@"; do
-  if [[ "$arg" == "--skip-kafka" ]]; then
-    SKIP_KAFKA="true"
-  fi
-done
-
 HOST="${GCP_VM_HOST:-${VM_HOST:-}}"
 USER="${GCP_VM_USER:-${VM_USER:-}}"
 KEY="${GCP_VM_SSH_KEY:-${SSH_KEY_PATH:-}}"
 PORT="${GCP_VM_SSH_PORT:-${VM_PORT:-22}}"
 REMOTE_PATH="${PRODUCER_DEPLOY_PATH:-${DEPLOY_PATH:-}}"
-ADVERTISED_HOST="${KAFKA_ADVERTISED_HOST:-}"
 
 if [[ -z "$HOST" || -z "$USER" ]]; then
   echo "Error: GCP_VM_HOST and GCP_VM_USER must be set in .env.deploy or environment." >&2
@@ -54,7 +46,6 @@ fi
 echo "================================================================="
 echo ">>> Deploying Producer to $USER@$HOST:$PORT"
 echo ">>> Remote Path: $REMOTE_PATH"
-echo ">>> Skip Kafka Container: $SKIP_KAFKA"
 echo "================================================================="
 
 # 1. Ensure target directory exists on remote VM
@@ -92,16 +83,7 @@ else
       -C "$ROOT_DIR" -czf - . | ssh "${SSH_OPTS[@]}" "$USER@$HOST" "tar -xzf - -C '$REMOTE_PATH'"
 fi
 
-# 3. Ensure Kafka container is running if not skipped
-if [[ "$SKIP_KAFKA" != "true" ]]; then
-  echo ">>> Ensuring Kafka container is running on $HOST..."
-  ssh "${SSH_OPTS[@]}" "$USER@$HOST" \
-    "DEPLOY_PATH='$REMOTE_PATH' KAFKA_ADVERTISED_HOST='$ADVERTISED_HOST' bash '$REMOTE_PATH/deploy/ensure-kafka.sh'"
-else
-  echo ">>> Skipping Kafka container management on $HOST (--skip-kafka requested)."
-fi
-
-# 4. Execute remote deploy.sh
+# 3. Execute remote deploy.sh
 echo ">>> Executing remote deploy.sh on $HOST..."
 ssh "${SSH_OPTS[@]}" "$USER@$HOST" \
   "DEPLOY_PATH='$REMOTE_PATH' bash '$REMOTE_PATH/deploy/deploy.sh'"
