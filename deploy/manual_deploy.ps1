@@ -138,7 +138,8 @@ if ($LASTEXITCODE -ne 0) {
 
 # 3. Execute remote deploy.sh
 Write-Host ">>> Executing remote deploy.sh on $hostName..." -ForegroundColor Yellow
-& ssh $sshArgs "${userName}@${hostName}" "DEPLOY_PATH='$remoteDir' bash '$remoteDir/deploy/deploy.sh'"
+$cleanupCron = if ($env:LOG_CLEANUP_CRON) { $env:LOG_CLEANUP_CRON } else { "0 8 * * *" }
+& ssh $sshArgs "${userName}@${hostName}" "DEPLOY_PATH='$remoteDir' LOG_CLEANUP_CRON='$cleanupCron' bash '$remoteDir/deploy/deploy.sh'"
 if ($LASTEXITCODE -ne 0) {
     throw "Remote deploy.sh on $hostName reported an error."
 }

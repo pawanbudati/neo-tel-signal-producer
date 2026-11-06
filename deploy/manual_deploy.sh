@@ -85,7 +85,8 @@ fi
 
 # 3. Execute remote deploy.sh
 echo ">>> Executing remote deploy.sh on $HOST..."
+CLEANUP_CRON="${LOG_CLEANUP_CRON:-0 8 * * *}"
 ssh "${SSH_OPTS[@]}" "$USER@$HOST" \
-  "DEPLOY_PATH='$REMOTE_PATH' bash '$REMOTE_PATH/deploy/deploy.sh'"
+  "DEPLOY_PATH='$REMOTE_PATH' LOG_CLEANUP_CRON='$CLEANUP_CRON' bash '$REMOTE_PATH/deploy/deploy.sh'"
 
 echo ">>> Producer deployment completed successfully!"
