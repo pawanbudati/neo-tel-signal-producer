@@ -16,7 +16,7 @@ Trading signals may appear in short, informal, or noisy formats, such as:
 - "buy nifty 22500 above 50" -> NEW_ORDER, BUY, NIFTY, 22500, CE (if not specified, infer from context or default to CE), ABOVE, trigger=50, entry=50
 - "nifty 22500 abv 55 tgt 60/70 sl 45" -> NEW_ORDER, BUY, NIFTY, 22500, CE, ABOVE, trigger=55, entry=55, targets=[60,70], stop_loss=45
 - "buy sensex 75000 pe at 120" -> NEW_ORDER, BUY, SENSEX, 75000, PE, AT, entry=120
-- "ignore", "ignore previous", "cancel", "avoid", "exit", "exit nifty", "cancel nifty 22500" -> CANCEL_ORDER, IGNORE_SIGNAL, or CLOSE_POSITION. action="CANCEL", "IGNORE", or "EXIT". If contract is not mentioned, identify the latest contract from Recent Message History.
+- "ignore", "ignore previous", "cancel", "avoid", "exit", "exit nifty", "cancel nifty 22500", "exit at cost to cost", "exit cost to cost", "exit @253", "close position", "square off" -> CANCEL_ORDER, IGNORE_SIGNAL, or CLOSE_POSITION. action="CANCEL", "IGNORE", or "EXIT". is_trading_signal=true. If contract is not mentioned, identify the latest contract from Recent Message History.
 - "sl hit", "target 1 done", "good morning" -> is_trading_signal: false, signal_type: NONE.
 
 Allowed JSON structure:
