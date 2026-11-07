@@ -1,6 +1,8 @@
 # Telegram Signal Producer
 
-The **Signal Producer** is an asynchronous ingestion and parsing service for algorithmic trading. It listens to selected Telegram channels/groups using Telethon, parses natural-language trading instructions into structured JSON schemas using Google Gemini GenAI, and publishes validated signals to Apache Kafka.
+An asynchronous, AI-powered trading signal ingestion and parsing engine for Indian derivatives (NIFTY, BANKNIFTY, SENSEX, FINNIFTY).
+
+The **Signal Producer** monitors designated Telegram channels and private groups using the MTProto protocol via **Telethon**, uses **Google Gemini 2.5 / 3.8 Flash** with conversational memory context to parse free-form Hindi/English trading instructions into strictly typed JSON trading events, and publishes validated events to **Apache Kafka**.
 
 ---
 
@@ -8,128 +10,159 @@ The **Signal Producer** is an asynchronous ingestion and parsing service for alg
 
 ```mermaid
 flowchart LR
-    TG[Telegram Channel / Group] -->|New Message| TL[Telethon Listener]
-    TL -->|Message + Context History| GM[Gemini Parser]
-    GM -->|Structured ParsedSignal| SD[Signal Dispatcher]
-    SD -->|Publish Event| KP[Kafka Producer]
-    KP -->|Idempotent Event| KF[(Remote Kafka Broker\ne.g., OCI Always Free)]
-    KF --> C1[Yuva Consumer VM]
-    KF --> C2[Pavan Consumer VM]
-    KF --> C3[Sahi Consumer VM]
+    subgraph Telegram Ingestion
+        TG[Telegram Channels & Groups] -->|MTProto Protocol| TL[Telethon Signal Listener]
+        TL -->|Message + Context History| CM[Context Memory Window]
+    end
+
+    subgraph AI Extraction
+        CM -->|Prompt + Context| GM[Google Gemini GenAI Parser]
+        GM -->|Structured ParsedSignal| SD[Signal Dispatcher]
+    end
+
+    subgraph Kafka Messaging
+        SD -->|Publish Event| KP[Kafka Publisher]
+        KP -->|Key: Index_Strike_Option| KF[(Remote Apache Kafka Broker\ne.g., OCI Always Free)]
+    end
+
+    subgraph Consumers
+        KF --> C1[Yuva Consumer VM]
+        KF --> C2[Pavan Consumer VM]
+        KF --> C3[Sahi Consumer VM]
+    end
 ```
 
-- **Telegram Listener**: Streams real-time messages from configured Telegram channels via MTProto.
-- **Gemini Parser**: Uses Google Gemini to extract trading actions (`BUY`, `EXIT`, `CANCEL`), contract details (`NIFTY 24500 CE`), price conditions (`ABOVE`, `AT`, `BELOW`), stop-losses, and multi-targets.
-- **Context Awareness**: Maintains a sliding memory window of recent channel messages to interpret follow-up messages (e.g., *"Exit at cost to cost"*, *"SL 220"*, *"Cancel"*).
-- **Decoupled Kafka Backbone**: Publishes strictly to an external/remote Kafka cluster (e.g. OCI Always Free instance). No local Docker or ZooKeeper containers run on the producer VM.
+### Core Architecture Highlights
+- **Telethon MTProto Client**: Directly streams new messages, edits, and pinned updates with millisecond latency.
+- **Context-Aware Gemini Parsing**: Maintains a sliding memory window of the last several channel messages. This enables accurate interpretation of short follow-up messages like *"Exit now"*, *"Cost to cost exit"*, *"SL modified to 220"*, or *"Book 50% profit"*.
+- **Pure Cloud Decoupling**: Connects directly to an external/remote Kafka broker (e.g. OCI Always Free instance). No local Docker containers or ZooKeeper overhead are required on the Producer VM.
 
 ---
 
-## Kafka Event Schema
+## Signal Extraction & Kafka Event Schema
 
-Actionable messages are published as JSON payloads keyed by contract symbol (e.g., `NIFTY_24500_CE`):
+Every validated signal is published to Kafka topic `kotak_trading_signals` keyed by its contract symbol (`<INDEX>_<STRIKE>_<OPTION_TYPE>`, e.g. `NIFTY_23700_CE`).
 
+### Sample Published Kafka Message
 ```json
 {
   "is_trading_signal": true,
   "signal_type": "NEW_ORDER",
   "action": "BUY",
   "index": "NIFTY",
-  "strike_price": 24500,
+  "strike_price": 23700,
   "option_type": "CE",
   "order_condition": "ABOVE",
-  "entry_price": 250,
-  "trigger_price": 250,
-  "stop_loss": 220,
-  "target": [270, 290, 320],
+  "entry_price": 28.0,
+  "trigger_price": 28.0,
+  "stop_loss": 18.0,
+  "target": [38.0, 48.0, 60.0],
   "target_expiry": null,
-  "reasoning": "Breakout buy order above 250 with 3 targets",
-  "raw_message": "Nifty 24500 CE ABV 250 TGT 270/290/320 SL 220",
-  "timestamp": "2026-11-06T09:15:00+00:00",
+  "reasoning": "Breakout buy order for Nifty 23700 Call above 28 with 3 targets",
+  "raw_message": "Nifty 23700 ce abv 28 tgt 38/48/60 sl 18",
+  "timestamp": "2026-11-07T04:11:18+00:00",
   "_meta": {
-    "event_id": "9611e616-aff8-445f-9097-1f1087782926",
-    "published_at": "2026-11-06T09:15:01+00:00",
+    "event_id": "6c075c99-c6b4-4c8f-bdfc-7fcf6730aaaa",
+    "published_at": "2026-11-07T04:11:18.167310+00:00",
     "source": "telegram_gemini_extractor"
   }
 }
 ```
 
----
+### Supported Signal Types & Instructions
 
-## Configuration (`.env`)
-
-Copy `deploy/deploy.env.example` or create `.env` in the repository root:
-
-| Variable | Description |
-| :--- | :--- |
-| `TELEGRAM_API_ID` | Telegram API App ID from [my.telegram.org](https://my.telegram.org). |
-| `TELEGRAM_API_HASH` | Telegram API App Hash. |
-| `TELEGRAM_PHONE` | Account phone number (with country code, e.g. `+91xxxxxxxxxx`). |
-| `TELEGRAM_SESSION_NAME` | Session file name (defaults to `kotak_trader_session`). |
-| `TELEGRAM_CHANNELS` | Comma-separated channel IDs/usernames to monitor (e.g., `-1001234567890,@signalchannel`). |
-| `GEMINI_API_KEY` | Google Gemini API Key. |
-| `GEMINI_MODEL` | Gemini model name (e.g., `gemini-2.5-flash`). |
-| `KAFKA_BOOTSTRAP_SERVERS` | Remote Kafka address (e.g. `<OCI_KAFKA_PUBLIC_IP>:9092`). |
-| `KAFKA_TOPIC_SIGNALS` | Kafka topic name (defaults to `kotak_trading_signals`). |
+| Signal Type | Example Telegram Message | Resulting Action |
+| :--- | :--- | :--- |
+| `NEW_ORDER` | `NIFTY 24500 CE ABV 250 SL 210 TGT 280/310` | Places buy order above 250 with SL 210 and staged targets. |
+| `MODIFY_ORDER` | `Modify SL to 230` or `Trail SL cost to cost` | Updates protective stop-loss to revised price. |
+| `EXIT` | `Exit NIFTY 24500 CE` or `Square off full` | Immediately closes active position at Market price. |
+| `CANCEL` | `Cancel Nifty order` or `Ignore call` | Cancels pending entry order if not yet filled. |
 
 ---
 
-## Telegram Authentication
+## Configuration Reference (`.env`)
 
-Before running the service on a new machine or VM, authenticate Telegram once interactively:
+Create your `.env` file from `deploy/deploy.env.example` in the project root:
+
+| Variable | Description | Example |
+| :--- | :--- | :--- |
+| `TELEGRAM_API_ID` | Telegram API App ID from [my.telegram.org](https://my.telegram.org) | `12345678` |
+| `TELEGRAM_API_HASH` | Telegram API App Hash | `0123456789abcdef...` |
+| `TELEGRAM_PHONE` | Account phone number with country code | `+919876543210` |
+| `TELEGRAM_SESSION_NAME` | MTProto session file name | `kotak_trader_session` |
+| `TELEGRAM_CHANNELS` | Comma-separated channel IDs or usernames to monitor | `-1002105432724,8945503479` |
+| `GEMINI_API_KEY` | Google Gemini API Key | `AIzaSy...` |
+| `GEMINI_MODEL` | Google Gemini model identifier | `gemini-2.5-flash` |
+| `KAFKA_BOOTSTRAP_SERVERS` | Remote Kafka broker host:port | `129.225.75.71:9092` |
+| `KAFKA_TOPIC_SIGNALS` | Kafka topic to publish events | `kotak_trading_signals` |
+
+---
+
+## Telegram Authentication & Local Testing
+
+### 1. One-Time Interactive Telegram Login
+Before starting the systemd service on a new machine or VM, authenticate once interactively:
 
 ```bash
-# 1. Activate environment
+# Activate virtual environment
 source .venv/bin/activate
 
-# 2. Run interactive authentication
+# Launch interactive login CLI
 python main.py --login-telegram
 ```
-Enter your phone number, the verification code sent to your Telegram app, and your 2FA password (if enabled). This generates the local `kotak_trader_session.session` file.
+- Enter your phone number with country code.
+- Enter the login code received in your Telegram application.
+- Enter your 2FA Cloud Password (if enabled).
+- The credentials will be saved locally to `kotak_trader_session.session`.
 
-To test Gemini parsing locally without publishing to Kafka:
+### 2. Testing Gemini Parsing Locally
+Verify Gemini extraction and JSON output without publishing to Kafka:
 ```bash
-python main.py --test-signal "Nifty 24500 ce abv 250 tgt 270/290 sl 220"
+python main.py --test-signal "Nifty 23700 ce abv 28 tgt 38/48/60 sl 18"
 ```
 
 ---
 
 ## Automated Deployment (GitHub Actions)
 
-Deployments are triggered on push to `main` via [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) or manually via **Run workflow**.
+Deployments are automated via [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) on push to `main` (or via manual **Run workflow** trigger).
 
-### GitHub Repository Secrets & Variables
-Configure in **Settings $\rightarrow$ Secrets and variables $\rightarrow$ Actions**:
-- `GCP_VM_HOST`: Public IP of the Producer VM.
-- `GCP_VM_USER`: SSH user (e.g., `pawanbudati`).
-- `GCP_VM_SSH_KEY`: SSH private key.
-- `GCP_VM_KNOWN_HOSTS`: Verified SSH host key line.
-- `LOG_CLEANUP_CRON` *(Optional)*: Cron schedule for daily log cleanup and service restart (defaults to `0 8 * * *` / 8:00 AM daily).
+### GitHub Secrets Configuration
+Configure these in **Settings $\rightarrow$ Secrets and variables $\rightarrow$ Actions**:
 
-### Automated Features:
-1. **Zero Docker Overhead**: Removed local container initialization; connects to external Kafka broker.
-2. **Self-Healing Dependencies**: Auto-installs `python3-venv` and `python3-pip` if missing.
-3. **Daily Pre-Market Restart & Log Cleanup**: Automatically registers a root cron job in `/etc/cron.d/journal-log-cleanup`:
+| Secret / Variable Name | Description |
+| :--- | :--- |
+| `GCP_VM_HOST` | Public IP address of the Signal Producer VM |
+| `GCP_VM_USER` | SSH username (e.g., `pawanbudati`) |
+| `GCP_VM_SSH_KEY` | Private SSH deployment key |
+| `GCP_VM_KNOWN_HOSTS` | Known hosts entry containing public key of the VM |
+| `LOG_CLEANUP_CRON` *(Optional)* | Custom cron schedule for log cleanup & restart (defaults to `0 8 * * *`) |
+
+### Key Deployment Features:
+1. **Zero Docker Footprint**: Runs natively on Python with low CPU/RAM footprint, connecting directly to remote Kafka.
+2. **Self-Healing Dependencies**: Auto-installs `python3-venv` and `python3-pip` via `apt` if missing.
+3. **Daily 8:00 AM Pre-Market Restart & Log Cleanup**: Registers a root cron job in `/etc/cron.d/journal-log-cleanup`:
    ```cron
    0 8 * * * root journalctl --rotate && journalctl --vacuum-time=1s && systemctl restart neo-tel-signal-producer.service >/dev/null 2>&1
    ```
-   Ensures fresh socket connections, clean Telegram sessions, and zero disk bloat every morning at 8:00 AM IST.
+   - Cleanses the systemd journal logs to keep them fast and lightweight.
+   - Refreshes Telethon MTProto socket connections daily before market open.
 
 ---
 
 ## Manual Deployment (No GitHub Actions)
 
-Deploy directly from your machine using the included deployment scripts:
+Deploy from your local machine to the Producer VM using the included scripts:
 
 ### From Windows (PowerShell):
 ```powershell
 cd producer
 
-# Deploy to producer VM:
+# Deploy using default configured host:
 .\deploy\manual_deploy.ps1
 
-# Or pass host/user directly:
-.\deploy\manual_deploy.ps1 -VmHost "34.93.x.x" -VmUser "pawanbudati"
+# Override host IP and user:
+.\deploy\manual_deploy.ps1 -VmHost "34.xx.xx.xx" -VmUser "pawanbudati"
 ```
 
 ### From Linux / macOS / Git Bash:
@@ -142,16 +175,21 @@ cd producer
 
 ## Service Management & Troubleshooting
 
+Run these commands on the Signal Producer VM:
+
 ```bash
-# Service status
+# Check service health
 sudo systemctl status neo-tel-signal-producer
 
-# Live streaming logs
+# Tail live streaming incoming messages & Gemini parsing
 sudo journalctl -u neo-tel-signal-producer -f
 
-# Restart service
+# View logs from today only
+sudo journalctl -u neo-tel-signal-producer --since today
+
+# Restart service manually
 sudo systemctl restart neo-tel-signal-producer
 
-# Test Kafka broker connectivity from VM
-nc -zv <OCI_KAFKA_PUBLIC_IP> 9092
+# Test remote Kafka broker connectivity
+nc -zv 129.225.75.71 9092
 ```
