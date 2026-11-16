@@ -53,6 +53,7 @@ jobs:
           VM_USER: ${{ secrets.GCP_VM_USER || vars.GCP_VM_USER }}
           VM_PORT: ${{ vars.GCP_VM_SSH_PORT || '22' }}
           DEPLOY_PATH: ${{ vars.PRODUCER_DEPLOY_PATH || '/home/' }}
+          GCP_PUBSUB_KEY: ${{ secrets.GCP_PUBSUB_KEY }}
         run: |
           TARGET="${VM_IP:-$VM_HOST}"
           test -n "$TARGET" || { echo 'Set repository variable GCP_VM_HOST or GCP_VM_IP'; exit 1; }
@@ -69,6 +70,12 @@ jobs:
             --exclude='*.json' \
             -e "ssh -i ~/.ssh/deploy_key -p $VM_PORT -o StrictHostKeyChecking=accept-new" \
             ./ "$VM_USER@$TARGET:$DEPLOY_PATH/"
+          if [ -n "$GCP_PUBSUB_KEY" ]; then
+            echo "Deploying GCP Pub/Sub service account key to $TARGET:$DEPLOY_PATH/gcp-pubsub-key.json..."
+            printf '%s\n' "$GCP_PUBSUB_KEY" | ssh -i ~/.ssh/deploy_key -p "$VM_PORT" -o StrictHostKeyChecking=accept-new "$VM_USER@$TARGET" \
+              "cat > '$DEPLOY_PATH/gcp-pubsub-key.json' && chmod 600 '$DEPLOY_PATH/gcp-pubsub-key.json'"
+            echo "Key successfully provisioned."
+          fi
 
       - name: Deploy producer service
         env:
