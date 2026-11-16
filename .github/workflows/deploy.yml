@@ -27,24 +27,39 @@ jobs:
         env:
           SSH_PRIVATE_KEY: ${{ secrets.GCP_VM_SSH_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.GCP_VM_KNOWN_HOSTS }}
+          VM_IP: ${{ secrets.GCP_VM_IP || vars.GCP_VM_IP }}
+          VM_HOST: ${{ secrets.GCP_VM_HOST || vars.GCP_VM_HOST }}
+          VM_PORT: ${{ vars.GCP_VM_SSH_PORT || '22' }}
         run: |
+          TARGET="${VM_IP:-$VM_HOST}"
+          test -n "$TARGET" || { echo 'Set repository variable GCP_VM_HOST or GCP_VM_IP'; exit 1; }
           install -m 700 -d ~/.ssh
           printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          if [ -n "$SSH_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          fi
+          ssh-keyscan -p "$VM_PORT" -H "$TARGET" >> ~/.ssh/known_hosts 2>/dev/null || true
+          if [ -n "$VM_HOST" ] && [ -n "$VM_IP" ] && [ "$VM_HOST" != "$VM_IP" ]; then
+            ssh-keyscan -p "$VM_PORT" -H "$VM_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+            printf 'Host %s\n  HostName %s\n  Port %s\n  IdentityFile ~/.ssh/deploy_key\n  StrictHostKeyChecking accept-new\n' "$VM_HOST" "$VM_IP" "$VM_PORT" >> ~/.ssh/config
+            chmod 600 ~/.ssh/config
+          fi
 
       - name: Sync producer files to VM
         env:
+          VM_IP: ${{ secrets.GCP_VM_IP || vars.GCP_VM_IP }}
           VM_HOST: ${{ secrets.GCP_VM_HOST || vars.GCP_VM_HOST }}
           VM_USER: ${{ secrets.GCP_VM_USER || vars.GCP_VM_USER }}
           VM_PORT: ${{ vars.GCP_VM_SSH_PORT || '22' }}
           DEPLOY_PATH: ${{ vars.PRODUCER_DEPLOY_PATH || '/home/' }}
         run: |
-          test -n "$VM_HOST" || { echo 'Set repository variable GCP_VM_HOST'; exit 1; }
+          TARGET="${VM_IP:-$VM_HOST}"
+          test -n "$TARGET" || { echo 'Set repository variable GCP_VM_HOST or GCP_VM_IP'; exit 1; }
           test -n "$VM_USER" || { echo 'Set repository variable GCP_VM_USER'; exit 1; }
           if [ "$DEPLOY_PATH" = '/home/' ]; then DEPLOY_PATH="/home/$VM_USER/apps/neo-tel-signal-producer"; fi
-          ssh -i ~/.ssh/deploy_key -p "$VM_PORT" "$VM_USER@$VM_HOST" "mkdir -p '$DEPLOY_PATH'"
-          ssh -i ~/.ssh/deploy_key -p "$VM_PORT" "$VM_USER@$VM_HOST" 'if ! command -v rsync >/dev/null 2>&1; then if command -v apt-get >/dev/null 2>&1; then sudo apt-get update && sudo apt-get install -y rsync; elif command -v dnf >/dev/null 2>&1; then sudo dnf install -y rsync; elif command -v yum >/dev/null 2>&1; then sudo yum install -y rsync; else echo "No supported package manager found to install rsync" >&2; exit 1; fi; fi'
+          ssh -i ~/.ssh/deploy_key -p "$VM_PORT" -o StrictHostKeyChecking=accept-new "$VM_USER@$TARGET" "mkdir -p '$DEPLOY_PATH'"
+          ssh -i ~/.ssh/deploy_key -p "$VM_PORT" "$VM_USER@$TARGET" 'if ! command -v rsync >/dev/null 2>&1; then if command -v apt-get >/dev/null 2>&1; then sudo apt-get update && sudo apt-get install -y rsync; elif command -v dnf >/dev/null 2>&1; then sudo dnf install -y rsync; elif command -v yum >/dev/null 2>&1; then sudo yum install -y rsync; else echo "No supported package manager found to install rsync" >&2; exit 1; fi; fi'
           rsync -az --delete \
             --exclude='.git/' \
             --exclude='.env' --include='.env.example' --exclude='.env.*' \
@@ -52,17 +67,19 @@ jobs:
             --exclude='*.session' --exclude='*.session-*' \
             --exclude='logs/' --exclude='*.log' \
             --exclude='*.json' \
-            -e "ssh -i ~/.ssh/deploy_key -p $VM_PORT" \
-            ./ "$VM_USER@$VM_HOST:$DEPLOY_PATH/"
+            -e "ssh -i ~/.ssh/deploy_key -p $VM_PORT -o StrictHostKeyChecking=accept-new" \
+            ./ "$VM_USER@$TARGET:$DEPLOY_PATH/"
 
       - name: Deploy producer service
         env:
+          VM_IP: ${{ secrets.GCP_VM_IP || vars.GCP_VM_IP }}
           VM_HOST: ${{ secrets.GCP_VM_HOST || vars.GCP_VM_HOST }}
           VM_USER: ${{ secrets.GCP_VM_USER || vars.GCP_VM_USER }}
           VM_PORT: ${{ vars.GCP_VM_SSH_PORT || '22' }}
           DEPLOY_PATH: ${{ vars.PRODUCER_DEPLOY_PATH || '/home/' }}
           LOG_CLEANUP_CRON: ${{ secrets.LOG_CLEANUP_CRON_PRODUCER || vars.LOG_CLEANUP_CRON_PRODUCER || secrets.LOG_CLEANUP_CRON || vars.LOG_CLEANUP_CRON || '0 8 * * *' }}
         run: |
+          TARGET="${VM_IP:-$VM_HOST}"
           if [ "$DEPLOY_PATH" = '/home/' ]; then DEPLOY_PATH="/home/$VM_USER/apps/neo-tel-signal-producer"; fi
-          ssh -i ~/.ssh/deploy_key -p "$VM_PORT" "$VM_USER@$VM_HOST" \
+          ssh -i ~/.ssh/deploy_key -p "$VM_PORT" -o StrictHostKeyChecking=accept-new "$VM_USER@$TARGET" \
             "DEPLOY_PATH='$DEPLOY_PATH' LOG_CLEANUP_CRON='$LOG_CLEANUP_CRON' bash '$DEPLOY_PATH/deploy/deploy.sh'"
