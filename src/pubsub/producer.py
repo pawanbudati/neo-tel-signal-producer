@@ -34,8 +34,8 @@ class PubSubSignalProducer:
         credentials_path: Optional[str] = None,
         emulator_host: Optional[str] = None,
     ):
-        self.project_id = project_id or settings.gcp_project_id
-        self.topic_id = topic or settings.pubsub_topic_signals
+        self.project_id = project_id if project_id is not None else settings.gcp_project_id
+        self.topic_id = topic if topic is not None else settings.pubsub_topic_signals
         self.credentials_path = credentials_path or settings.pubsub_credentials_path
         self.emulator_host = emulator_host or settings.pubsub_emulator_host
 
