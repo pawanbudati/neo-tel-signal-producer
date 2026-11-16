@@ -2,7 +2,7 @@
 
 An asynchronous, AI-powered trading signal ingestion and parsing engine for Indian derivatives (NIFTY, BANKNIFTY, SENSEX, FINNIFTY).
 
-The **Signal Producer** monitors designated Telegram channels and private groups using the MTProto protocol via **Telethon**, uses **Google Gemini 2.5 / 3.8 Flash** with conversational memory context to parse free-form Hindi/English trading instructions into strictly typed JSON trading events, and publishes validated events to **Apache Kafka**.
+The **Signal Producer** monitors designated Telegram channels and private groups using the MTProto protocol via **Telethon**, uses **Google Gemini 2.5 / 3.8 Flash** with conversational memory context to parse free-form Hindi/English trading instructions into strictly typed JSON trading events, and publishes validated events to **Google Cloud Pub/Sub** under the **Always Free Tier**.
 
 ---
 
@@ -20,30 +20,30 @@ flowchart LR
         GM -->|Structured ParsedSignal| SD[Signal Dispatcher]
     end
 
-    subgraph Kafka Messaging
-        SD -->|Publish Event| KP[Kafka Publisher]
-        KP -->|Key: Index_Strike_Option| KF[(Remote Apache Kafka Broker\ne.g., OCI Always Free)]
+    subgraph PubSub Messaging
+        SD -->|Publish Event| PP[Pub/Sub Publisher]
+        PP -->|Ordering Key: Index_Strike_Option| PS[(Google Cloud Pub/Sub\nTopic: kotak_trading_signals)]
     end
 
     subgraph Consumers
-        KF --> C1[Yuva Consumer VM]
-        KF --> C2[Pavan Consumer VM]
-        KF --> C3[Sahi Consumer VM]
+        PS -->|Sub: kotak_executor_yuva| C1[Yuva Consumer VM]
+        PS -->|Sub: kotak_executor_pavan| C2[Pavan Consumer VM]
+        PS -->|Sub: kotak_executor_sahi| C3[Sahi Consumer VM]
     end
 ```
 
 ### Core Architecture Highlights
 - **Telethon MTProto Client**: Directly streams new messages, edits, and pinned updates with millisecond latency.
 - **Context-Aware Gemini Parsing**: Maintains a sliding memory window of the last several channel messages. This enables accurate interpretation of short follow-up messages like *"Exit now"*, *"Cost to cost exit"*, *"SL modified to 220"*, or *"Book 50% profit"*.
-- **Pure Cloud Decoupling**: Connects directly to an external/remote Kafka broker (e.g. OCI Always Free instance). No local Docker containers or ZooKeeper overhead are required on the Producer VM.
+- **Pure Cloud Serverless Decoupling**: Connects directly to Google Cloud Pub/Sub under the Always Free Tier (10 GB/month message ingestion & delivery free). Zero Kafka broker setup, zero Zookeeper/KRaft, and zero disk filling issues.
 
 ---
 
-## Signal Extraction & Kafka Event Schema
+## Signal Extraction & Pub/Sub Event Schema
 
-Every validated signal is published to Kafka topic `kotak_trading_signals` keyed by its contract symbol (`<INDEX>_<STRIKE>_<OPTION_TYPE>`, e.g. `NIFTY_23700_CE`).
+Every validated signal is published to Google Cloud Pub/Sub topic `kotak_trading_signals` with `ordering_key` set to its contract symbol (`<INDEX>_<STRIKE>_<OPTION_TYPE>`, e.g. `NIFTY_23700_CE`) to ensure strict FIFO delivery order per strike.
 
-### Sample Published Kafka Message
+### Sample Published Pub/Sub Message
 ```json
 {
   "is_trading_signal": true,
@@ -93,8 +93,10 @@ Create your `.env` file from `deploy/deploy.env.example` in the project root:
 | `TELEGRAM_CHANNELS` | Comma-separated channel IDs or usernames to monitor | `-1002105432724,8945503479` |
 | `GEMINI_API_KEY` | Google Gemini API Key | `AIzaSy...` |
 | `GEMINI_MODEL` | Google Gemini model identifier | `gemini-2.5-flash` |
-| `KAFKA_BOOTSTRAP_SERVERS` | Remote Kafka broker host:port | `129.225.75.71:9092` |
-| `KAFKA_TOPIC_SIGNALS` | Kafka topic to publish events | `kotak_trading_signals` |
+| `GCP_PROJECT_ID` | Google Cloud Project ID | `your-gcp-project-id` |
+| `PUBSUB_TOPIC_SIGNALS` | Pub/Sub topic to publish events | `kotak_trading_signals` |
+| `GOOGLE_APPLICATION_CREDENTIALS` | (Optional) Path to service account JSON key | `/path/to/service-account.json` |
+| `PUBSUB_EMULATOR_HOST` | (Optional) Local emulator for offline testing | `localhost:8085` |
 
 ---
 

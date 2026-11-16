@@ -20,6 +20,13 @@ class Settings(BaseModel):
     gemini_temperature: float = Field(default_factory=lambda: float(os.getenv("GEMINI_TEMPERATURE", "0.1")))
     gemini_timeout_seconds: int = Field(default_factory=lambda: int(os.getenv("GEMINI_TIMEOUT_SECONDS", "30")))
     message_history_context_size: int = Field(default_factory=lambda: int(os.getenv("MESSAGE_HISTORY_CONTEXT_SIZE", "5")))
+    # Google Cloud Pub/Sub (Always Free Tier)
+    gcp_project_id: str = Field(default_factory=lambda: os.getenv("GCP_PROJECT_ID", os.getenv("GOOGLE_CLOUD_PROJECT", "")))
+    pubsub_topic_signals: str = Field(default_factory=lambda: os.getenv("PUBSUB_TOPIC_SIGNALS", os.getenv("KAFKA_TOPIC_SIGNALS", "kotak_trading_signals")))
+    pubsub_credentials_path: str | None = Field(default_factory=lambda: os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or os.getenv("GCP_CREDENTIALS_PATH"))
+    pubsub_emulator_host: str | None = Field(default_factory=lambda: os.getenv("PUBSUB_EMULATOR_HOST"))
+
+    # Legacy Kafka settings (kept for backwards compatibility)
     kafka_bootstrap_servers: str = Field(default_factory=lambda: os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"))
     kafka_topic_signals: str = Field(default_factory=lambda: os.getenv("KAFKA_TOPIC_SIGNALS", "kotak_trading_signals"))
     kafka_security_protocol: str = Field(default_factory=lambda: os.getenv("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT"))

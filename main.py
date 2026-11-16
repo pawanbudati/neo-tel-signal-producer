@@ -5,17 +5,25 @@ import os
 
 from config.settings import settings
 from src.gemini_parser import GeminiParser
-from src.kafka.producer import KafkaSignalProducer
+from src.pubsub.producer import PubSubSignalProducer
 from src.logger import logger
 from src.signal_dispatcher import SignalDispatcher
 from src.telegram_listener import TelegramListener
 
 
-async def run_producer(servers: str | None = None, topic: str | None = None):
-    producer = KafkaSignalProducer(bootstrap_servers=servers, topic=topic)
+async def run_producer(
+    project_id: str | None = None,
+    topic: str | None = None,
+    credentials_path: str | None = None,
+):
+    producer = PubSubSignalProducer(
+        project_id=project_id,
+        topic=topic,
+        credentials_path=credentials_path,
+    )
     await producer.start()
     dispatcher = SignalDispatcher()
-    dispatcher.register("kafka_publisher", producer.publish)
+    dispatcher.register("pubsub_publisher", producer.publish)
     listener = TelegramListener(dispatcher=dispatcher)
     try:
         await listener.start()
@@ -47,9 +55,12 @@ async def test_signal(text: str):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Telegram/Gemini Kafka signal producer")
-    parser.add_argument("--kafka-servers", default=None)
-    parser.add_argument("--kafka-topic", default=None)
+    parser = argparse.ArgumentParser(description="Telegram/Gemini GCP Pub/Sub signal producer")
+    parser.add_argument("--project-id", "--gcp-project", dest="project_id", default=None, help="GCP Project ID")
+    parser.add_argument("--pubsub-topic", "--topic", dest="pubsub_topic", default=None, help="GCP Pub/Sub Topic ID")
+    parser.add_argument("--credentials-path", default=None, help="Path to GCP service account JSON key")
+    parser.add_argument("--kafka-servers", default=None, help="[Deprecated] Kafka bootstrap servers")
+    parser.add_argument("--kafka-topic", default=None, help="[Deprecated] Kafka topic")
     parser.add_argument("--login-telegram", action="store_true")
     parser.add_argument("--test-signal", help="Parse a message with Gemini without publishing it")
     args = parser.parse_args()
@@ -59,7 +70,12 @@ def main():
         elif args.test_signal:
             asyncio.run(test_signal(args.test_signal))
         else:
-            asyncio.run(run_producer(args.kafka_servers, args.kafka_topic))
+            topic = args.pubsub_topic or args.kafka_topic
+            asyncio.run(run_producer(
+                project_id=args.project_id,
+                topic=topic,
+                credentials_path=args.credentials_path,
+            ))
     except KeyboardInterrupt:
         logger.info("Producer stopped by user.")
 
